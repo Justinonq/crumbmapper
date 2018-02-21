@@ -5,7 +5,7 @@ This tool was written for QAnon patriots looking to make maps out of QAnon's cru
 
 It is:
 * A browser based app - you download the crumb-mapper.html file and open it in a modern browser
-* Uses some modern browser features - namely Blob and javascript classes
+* Uses some modern browser features - namely Blob and javascript class objects
 * It runs entirely local and makes no outgoing requests
 
 It can create a map of information, including:
@@ -16,6 +16,9 @@ It can create a map of information, including:
 * images (needs base64 encoded data, use a tool like https://www.base64-image.de)
 
 To start:
+* Download the app's html file https://raw.githubusercontent.com/Justinonq/crumbmapper/master/crumb-mapper.html
+* Download the starter map file https://raw.githubusercontent.com/Justinonq/crumbmapper/master/starter-map.json
+* Open the app's html file in your browser
 * Click on the Data Import/Export Options
 * Click Open
 * Choose the starter-map.json
