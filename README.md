@@ -1,5 +1,4 @@
-# crumbmapper
-QAnon Crumb Mapper - V1
+# QAnon Crumb Mapper - V1
 
 This tool was written for QAnon patriots looking to make maps out of QAnon's crumbs.
 
