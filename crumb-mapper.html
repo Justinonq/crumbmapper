@@ -1,0 +1,1456 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Q Crumb Mapper</title>
+		<script>
+			var map = new Object(); // stores your map
+			map.entities = {};
+			map.questions = {};
+			map.events = {};
+			map.links = {};
+			map.images = {};
+			map.connections = {};
+
+			var pics = new Object(); // stores base64 encoded pics
+            
+			const C_LOCALSTORAGEITEM = "QCrumbMap";
+			const C_SELECTCOLOR = "blue";
+			const C_MAXLABELLENGTH = 200;
+			const C_EMPTYSTRING = "";
+			const C_LINEHEIGHT = 20;
+            const C_CONNECTION_LINE_COLOR = "gray";
+            const C_CONNECTION_ARROWHEAD_WIDTH = 1;
+            const C_CONNECTION_ARROWHEAD_LENGTH = 10;
+            const C_CANVAS_WIDTH = 3000;
+            const C_CANVAS_HEIGHT = 3000;
+            const C_LABEL_MARGIN_TOP = 45;
+            const C_LABEL_MARGIN_LEFT = 10;
+            const C_LABEL_MARGIN_RIGHT = 10;
+            const C_LABEL_MARGIN_BOTTOM = 30;
+            const C_TITLE_FONT = "20px sans-serif";
+            const C_LABEL_FONT = "11px sans-serif";
+            const C_TITLE_COLOR = "black";
+
+			var colors = {};
+			colors["entity"] = {bg:"rgb(255, 200, 200)", fg:"black"};
+			colors["org"] = {bg:"rgb(200,255,200)", fg:"black"};
+			colors["nation"] = {bg:"rgb(200,200,255)", fg:"black"};
+			colors["location"] = {bg:"rgb(170,170,255)", fg:"black"};
+			colors["event"] = {bg:"rgb(200,255,255)", fg:"black"};
+			colors["image"] = {bg:"rgb(200,200,200)", fg:"black"};
+			colors["program"] = {bg:"rgb(255,255,200)", fg:"black"};
+			colors["question"] = {bg:"rgb(230,200,255)", fg:"black"};
+			colors["link"] = {bg:"rgb(255,255,255)", fg:"darkblue"};
+
+            var selectedfile = null;
+
+			function loadLocalData(){
+				var retdata = localStorage.getItem(C_LOCALSTORAGEITEM);
+				if(retdata != null)
+				{
+					var dataobj = JSON.parse(retdata);
+					buildView(dataobj);
+				}
+			}
+			function saveData()
+			{
+                prepareData();
+				localStorage.setItem(C_LOCALSTORAGEITEM, JSON.stringify(map));
+			}
+			function loadData()
+			{
+				var datatxt = document.getElementById("data");
+				if(datatxt.value.length <= 2)
+				{
+					return;
+				}
+				if(datatxt.value[0] == '"')
+				{
+					datatxt.value = datatxt.value.substr(1,data.value.length - 2);
+				}
+				var dataobj = eval("(" + datatxt.value + ")");
+				buildView(dataobj);
+			}
+            function loadFile()
+            {
+                if(!selectedfile)
+                {
+                    hideForms();
+                    return;
+                }
+                var reader = new FileReader();
+                reader.onload = function(e){
+                    var dataobj = eval("(" + e.target.result + ")");
+                    buildView(dataobj);
+                    hideForms();
+                }
+                reader.readAsText(selectedfile);
+                selectedfile = null;
+            }
+			function buildView(dataobj)
+			{
+                // TITLE
+                if(dataobj.title && dataobj.title != C_EMPTYSTRING)
+                {
+                    map.title = dataobj.title;
+                    document.getElementById("map-title").value = map.title;
+                }
+
+				// MULTI-TYPE
+
+				// ENTITIES
+				for(var e in dataobj.entities)
+				{
+					map.entities[e] = dataobj.entities[e];
+					map.entities[e].region = new Region(dataobj.entities[e], e);
+				}
+
+				// QUESTIONS
+				for(var q in dataobj.questions)
+				{
+					map.questions[q] = dataobj.questions[q];
+					map.questions[q].region = new Region(dataobj.questions[q], q);
+				}
+
+                // EVENTS
+				for(var v in dataobj.events)
+				{
+					map.events[v] = dataobj.events[v];
+					map.events[v].region = new Region(dataobj.events[v], v);
+				}
+                
+				// LINKS
+				for(var n in dataobj.links)
+				{
+					map.links[n] = dataobj.links[n];
+					map.links[n].region = new Region(dataobj.links[n], n);
+				}
+
+				// IMAGES
+				for(var i in dataobj.images)
+				{
+					map.images[i] = dataobj.images[i];
+					map.images[i].region = new Region(dataobj.images[i], i);
+					pics[i] = new Image();
+					pics[i].src = map.images[i].data;
+					pics[i].id = i;
+					pics[i].addEventListener("load", function(e){
+						map.images[e.srcElement.id].region.width = e.target.width;
+						map.images[e.srcElement.id].region.height = e.target.height;
+						redraw();
+					});
+				}
+
+				// CONNECTIONS
+				for(var c in dataobj.connections)
+				{
+					var connection = dataobj.connections[c];
+					map.connections[c] = new Connection(c, connection.entity1, connection.entity2, connection.how_connected);
+				}
+
+				redraw();
+			}
+            function generateGUID()
+            {
+                var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+                var ret = C_EMPTYSTRING;
+                for(var c = 0; c < 16; c++)
+                {
+                    if(c % 4 == 0 && c != 0)
+                        ret += "-";
+                    ret += chars[Math.floor(Math.random() * chars.length)];
+                }
+                return ret;
+            }
+            function prepareData()
+            {
+                map.guid = generateGUID();
+                var dt = new Date();
+                map.timestamp = dt.toISOString();
+            }
+			function exportData()
+			{
+                prepareData();
+				var datatxt = document.getElementById("data");
+				datatxt.value = JSON.stringify(map);
+			}
+            function exportFile()
+            {
+                prepareData();
+                var blob = new Blob([JSON.stringify(map)], {type:"text/json"});
+                var url = window.URL.createObjectURL(blob);
+
+                var anchorElem = document.createElement("a");
+                anchorElem.style = "display: none";
+                anchorElem.href = url;
+                anchorElem.download = map.guid + ".json";
+
+                document.body.appendChild(anchorElem);
+                anchorElem.click();
+
+                document.body.removeChild(anchorElem);
+
+                // On Edge, revokeObjectURL should be called only after
+                // a.click() has completed, atleast on EdgeHTML 15.15048
+                setTimeout(function() {
+                    window.URL.revokeObjectURL(url);
+                }, 1000);
+            }
+			function hideForms(){
+				var forms = document.getElementsByClassName("input-form");
+				for(var f = 0; f < forms.length; f++)
+				{
+					forms[f].style.display = "none";
+				}
+				var bg = document.getElementById("blackout");
+				bg.style.display = "none";
+				document.getElementById("edit-entity-id").value = "";
+			}
+			function showForm(type)
+			{
+				var bg = document.getElementById("blackout");
+				bg.style.display = "block";
+                bg.style.left = document.body.scrollLeft;
+                bg.style.top = document.body.scrollTop;
+				var form = document.getElementById("edit-" + type);
+				var inputs = form.getElementsByTagName("input");
+				var obj = null;
+				var prop = type;
+				if(type[type.length-1] == 'y')
+					prop = type.substr(0, type.length-1) + "ies";
+				else
+					prop += "s";
+
+				var objid = "";
+
+				if(selectedobjs.length > 0 && map[prop][selectedobjs[0].ref])
+				{
+					obj = map[prop][selectedobjs[0].ref];
+					objid = selectedobjs[0].ref;
+				}
+
+				// clear all inputs
+				for(var i = 0; i < inputs.length; i++)
+				{
+					if(inputs[i].type == "button")
+						continue;
+					inputs[i].value = "";
+				}
+				if(obj != null)
+				{
+					document.getElementById("edit-" + type + "-title").innerHTML = "Edit " + type;
+					for(var p in obj)
+					{
+						var input = document.getElementById("edit-" + type + "-" + p);
+						if(input)
+						{
+							if(Array.isArray(obj[p]))
+								input.value = obj[p].join(", ");
+							else
+								input.value = obj[p];
+						}
+					}
+				}
+				else
+				{
+					document.getElementById("edit-" + type + "-title").innerHTML = "Add " + type;
+				}
+				document.getElementById("edit-" + type + "-id").value = objid;
+				form.style.display = "block";
+				form.getElementsByTagName("input")[1].focus();
+			}
+            function showLoadFileForm()
+            {
+				var bg = document.getElementById("blackout");
+				bg.style.display = "block";
+                bg.style.left = document.body.scrollLeft;
+                bg.style.top = document.body.scrollTop;
+				var form = document.getElementById("form-loadfile");
+				form.style.display = "block";
+				form.getElementsByTagName("input")[0].focus();
+            }
+			function editEntity()
+			{
+				var nentity = new Object();
+				if(document.getElementById("edit-entity-id").value != "")
+				{
+					nentity = map.entities[document.getElementById("edit-entity-id").value];
+				}
+				nentity.name = document.getElementById("edit-entity-name").value;
+				nentity.type = document.getElementById("edit-entity-type").value;
+				nentity.notes = document.getElementById("edit-entity-notes").value;
+				var postmentions = document.getElementById("edit-entity-posts").value;
+				nentity.posts = makePostArrayFromCommaDelimString(postmentions);
+				if(document.getElementById("edit-entity-id").value == "")
+				{
+					var id = makeIdFromName(nentity.name);
+					if(map.entities[id])
+					{
+						alert("This entity already exists as " + map.entities[id].name + ".\nPlease choose a different name.");
+						return;
+					}
+					else
+					{
+						map.entities[id] = nentity;
+						nentity.region = new Region(nentity, id);
+						selectedobjs = [nentity.region];
+						hideForms();
+					}
+				}
+				else
+				{
+					nentity.region.Name = nentity.name;
+                    nentity.region.type = nentity.type;
+					hideForms();
+				}
+
+				redraw();
+			}
+
+			function editQuestion()
+			{
+				var nquestion = new Object();
+				if(document.getElementById("edit-question-id").value != "")
+				{
+					nquestion = map.questions[document.getElementById("edit-question-id").value];
+				}
+				nquestion.name = document.getElementById("edit-question-name").value;
+				nquestion.notes = document.getElementById("edit-question-notes").value;
+				nquestion.type = "question";
+				var postmentions = document.getElementById("edit-question-posts").value;
+				nquestion.posts = makePostArrayFromCommaDelimString(postmentions);
+				if(document.getElementById("edit-question-id").value == "")
+				{
+					var id = makeIdFromName(nquestion.name);
+					if(map.questions[id])
+					{
+						alert("This question already exists");
+						return;
+					}
+					else
+					{
+						map.questions[id] = nquestion;
+						nquestion.region = new Region(nquestion, id);
+						selectedobjs = [nquestion.region];
+						hideForms();
+					}
+				}
+				else
+				{
+					nquestion.region.Name = nquestion.name;
+					hideForms();
+				}
+				redraw();
+			}
+
+			function makeIdFromName(name)
+			{
+				var id = name.replace(/[^A-Za-z0-9-]/gi, "");
+				id = id.toUpperCase();
+				return id;
+			}
+
+			function makePostArrayFromCommaDelimString(str)
+			{
+				ret = [];
+				if(str != null && str.trim() != "")
+				{
+					ret = str.split(/\s*,\s*/gi);
+					for(var m in ret)
+					{
+						ret[m] = parseInt(ret[m]);
+					}
+				}
+				return ret;
+			}
+
+			function editEvent()
+			{
+				var nevent = new Object();
+				if(document.getElementById("edit-event-id").value != "")
+				{
+					nevent = map.events[document.getElementById("edit-event-id").value];
+				}
+				nevent.name = document.getElementById("edit-event-name").value;
+				nevent.notes = document.getElementById("edit-event-notes").value;
+				nevent.date = document.getElementById("edit-event-date").value;
+				nevent.location = document.getElementById("edit-event-location").value;
+				nevent.type = "event";
+				var postmentions = document.getElementById("edit-event-posts").value;
+				nevent.posts = makePostArrayFromCommaDelimString(postmentions);
+
+				if(document.getElementById("edit-event-id").value == "")
+				{
+					var id = makeIdFromName(nevent.name);
+					if(map.events[id])
+					{
+						alert("This event already exists");
+						return;
+					}
+					else
+					{
+						map.events[id] = nevent;
+						nevent.region = new Region(nevent, id);
+						selectedobjs = [nevent.region];
+						hideForms();
+					}
+				}
+				else
+				{
+					nevent.region.Name = nevent.name;
+					hideForms();
+				}
+				redraw();
+			}
+
+			function editLink()
+			{
+				var nlink = new Object();
+				if(document.getElementById("edit-link-id").value != "")
+				{
+					nlink = map.links[document.getElementById("edit-link-id").value];
+				}
+				nlink.name = document.getElementById("edit-link-name").value;
+				nlink.notes = document.getElementById("edit-link-notes").value;
+				nlink.url = document.getElementById("edit-link-url").value;
+				nlink.date = document.getElementById("edit-link-date").value;
+				nlink.type = "link";
+				var postmentions = document.getElementById("edit-link-posts").value;
+				nlink.posts = makePostArrayFromCommaDelimString(postmentions);
+
+				if(document.getElementById("edit-link-id").value == "")
+				{
+					var id = makeIdFromName(nlink.name);
+					if(map.links[id])
+					{
+						alert("This link already exists");
+						return;
+					}
+					else
+					{
+						map.links[id] = nlink;
+						nlink.region = new Region(nlink, id);
+						selectedobjs = [nlink.region];
+						hideForms();
+					}
+				}
+				else
+				{
+					nlink.region.Name = nlink.name;
+					hideForms();
+				}
+				redraw();
+			}
+
+			function editImage()
+			{
+				var nimage = new Object();
+				if(document.getElementById("edit-image-id").value != "")
+				{
+					nimage = map.images[document.getElementById("edit-image-id").value];
+                    document.getElementById("edit-image-data").disabled = true;
+				}
+				nimage.name = document.getElementById("edit-image-name").value;
+				nimage.data = document.getElementById("edit-image-data").value;
+				nimage.notes = document.getElementById("edit-image-notes").value;
+				nimage.url = document.getElementById("edit-image-url").value;
+				nimage.type = "image";
+				var postmentions = document.getElementById("edit-image-posts").value;
+				nimage.posts = makePostArrayFromCommaDelimString(postmentions);
+
+				if(document.getElementById("edit-image-id").value == "")
+				{
+					var id = makeIdFromName(nimage.name);
+					if(map.images[id])
+					{
+						alert("An image named " + nimage.name + " already exists");
+						return;
+					}
+					else
+					{
+						map.images[id] = nimage;
+						nimage.region = new Region(nimage, id);
+						selectedobjs = [nimage.region];
+						pics[id] = new Image();
+						pics[id].src = nimage.data;
+                        pics[id].id = id;
+                        pics[id].addEventListener("load", function(e){
+                            map.images[e.srcElement.id].region.width = e.target.width;
+                            map.images[e.srcElement.id].region.height = e.target.height;
+                            redraw();
+                        });
+						hideForms();
+					}
+				}
+				else
+				{
+					nimage.region.Name = nimage.name;
+					hideForms();
+				}
+				redraw();
+				
+			}
+		</script>
+		<style>
+			body{
+				margin:0;
+				padding:0;
+				font-family:Arial;
+				font-size:14px;
+				color:#333;
+			}
+			canvas#main{
+                background-color:white;
+			}
+			header{
+				position:fixed;
+				height:30px;
+				width:100%;
+				background-color: rgb(240,240,240);
+				box-shadow: 0px 2px 3px rgba(0,0,0,.3);
+				padding:3px;
+				padding-bottom:0;
+			}
+			input[type=button]{
+				border-radius:4px;
+				border:2px outset;
+				background-color:white;
+				color:black;
+				font-size:14px;
+				font-family:Arial;
+				min-width:80px;
+			}
+			input[type=button]:active{
+				border:2px inset;
+			}
+			input[type=button]:disabled{
+				background-color:lightgray;
+				color:gray;
+			}
+			textarea#data{
+				height:100px;
+				width:97%;
+                max-width: 97%;
+			}
+			#data-controls{
+				float:right;
+				margin-right:5px;
+			}
+			#data-controls > * {
+				float:left;
+			}
+			#data-controls input[type=button]{
+				width:50px;
+			}
+			#blackout{
+				position:absolute;
+				left:0;
+				width:100%;
+				top:0;
+				height:100%;
+				background-color: rgba(0,0,0,.5);
+			}
+			.input-form{
+				padding:20px;
+				background-color:white;
+				border-radius:5px;
+				width:450px;
+				margin-left:auto;
+				margin-right:auto;
+				margin-top:100px;
+			}
+			.input-form label{
+				display:inline-flex;
+				width:150px;
+				text-align:right;
+				color:gray;
+				margin-right:5px;
+				white-space:nowrap;
+			}
+			.input-form > div {
+				line-height: 2em;
+			}
+			.input-form input[type=text]{
+				border-radius:3px;
+				border:1px solid gray;
+				width:200px;
+			}
+			.input-form textarea{
+				width:100%;
+				height:50px;
+			}
+			.form-buttons {
+				text-align:right;
+			}
+			header > span{
+				text-align: center;
+				border-left: 2px solid darkgray;
+				margin-left:5px;
+				width:7px;
+			}
+            input[type=text]#map-title{
+                width: 200px;
+                height: 20px;
+            }
+            #data-options-button{
+                border: 2px outset;
+                padding: 3px;
+                width: 200px;
+                border-color:lightgray;
+                margin-left: 5px;
+                text-align: center;
+                cursor:pointer;
+            }
+            .pushed{
+                border: 2px inset !important;
+                background-color:rgba(0,0,0,.2);
+            }
+            #data-options-panel{
+                position: fixed;
+                width: 200px;
+                top: 30px;
+                right: 5px;
+                padding: 5px;
+                box-shadow: 0px 2px 4px;
+                background-color: rgb(240,240,240);
+                display: none;
+            }
+            #data-options-panel h4{
+                background-color: lightgray;
+                padding: 5px;
+                color: #666;
+                margin-bottom: 5px;
+                margin-top: 0px;
+            }
+            #data-options-panel > div:last-child{
+                padding-bottom: 10px;
+            }
+		</style>
+	</head>
+	<body>
+		<header>
+			<input type="button" id="btn-entity" value="Add Entity" onclick="showForm('entity')" />
+			<input type="button" id="btn-question" value="Add Question" onclick="showForm('question')" />
+			<input type="button" id="btn-event" value="Add Event" onclick="showForm('event')" />
+			<input type="button" id="btn-link" value="Add Link" onclick="showForm('link')" />
+			<input type="button" id="btn-image" value="Add Image" onclick="showForm('image')" />
+			<span>&nbsp;</span>
+			<input type="button" id="btn-connect" value="Connect" disabled="true" onclick="connectObjs()"/>
+			<span>&nbsp;</span>
+			<input type="text" id="map-title" placeholder="Title" maxlength="100" />
+			
+			<div id="data-controls">
+                <input type="button" id="btn-save" value="Save" onclick="saveData()" />
+                <span id="data-options-button">Data Import/Export Options</span>
+			</div>
+        </header>
+
+        <!-- Data Options Panel -->
+        <div id="data-options-panel">
+            <h4>Map JSON copy/paste</h4>
+            <div>
+                <textarea id="data"></textarea>
+            </div>
+            <div>
+                <input type="button" id="btn-input" value="&raquo; Input" onclick="loadData()" />
+                <input type="button" id="btn-output" value="Output &raquo;" onclick="exportData()" />
+            </div>
+            <hr/>
+            <h4>JSON File Open/Export</h4>
+            <div>
+                <input type="button" id="btn-select-file" value="Open" onclick="showLoadFileForm()" />
+                <input type="button" id="btn-export-file" value="Export" onclick="exportFile()" />                    
+            </div>
+        </div>
+		<div id="blackout">
+
+            <!-- File Load -->
+            <div class="input-form" id="form-loadfile">
+                <h3 id="edit-entity-title">Choose file</h3>
+                <div>
+                    <label>File</label>
+                    <input type="file" id="file-select" />
+                </div>
+                <div class="form-buttons">
+                    <input type="button" value="Okay" onclick="loadFile()"/>
+                    <input type="button" value="Cancel" onclick="hideForms()"  />
+                </div>
+            </div>
+
+            <!-- MULTI-TYPE -->
+
+			<!-- Entity Form -->
+			<div class="input-form" id="edit-entity">
+                <input type="hidden" id="edit-entity-id" value="" />
+                <h3 id="edit-entity-title">Add Entity</h3>
+                <div>
+                    <label>Name</label>
+                    <input type="text" id="edit-entity-name" />
+                </div>
+                <div>
+                    <label>Type</label>
+                    <select id="edit-entity-type">
+                        <option value="person">person</option>
+                        <option value="org">organization</option>
+                        <option value="location">location/city</option>
+                        <option value="nation">nation</option>
+                        <option value="program">program/op</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Mentioned in posts</label>
+                    <input type="text" id="edit-entity-posts" />
+                </div>
+                <div>
+                    <label>Notes:</label><br/>
+                    <textarea id="edit-entity-notes"> 
+                    </textarea>
+                </div>
+                <div class="form-buttons">
+                    <input type="button" value="Okay" onclick="editEntity()"/>
+                    <input type="button" value="Cancel" onclick="hideForms()"  />
+                </div>
+            </div>
+            
+			<!-- Question Form -->
+			<div class="input-form" id="edit-question">
+                <input type="hidden" id="edit-question-id" value="" />
+                <h3 id="edit-question-title">Add Question</h3>
+                <div>
+                    <label>Question</label>
+                    <input type="text" id="edit-question-name" />
+                </div>
+                <div>
+                    <label>Asked in posts</label>
+                    <input type="text" id="edit-question-posts" />
+                </div>
+                <div>
+                    <label>Notes:</label><br/>
+                    <textarea id="edit-question-notes"> 
+                    </textarea>
+                </div>
+                <div class="form-buttons">
+                    <input type="button" value="Okay" onclick="editQuestion()"/>
+                    <input type="button" value="Cancel" onclick="hideForms()"  />
+                </div>
+            </div>
+        
+			<!-- Event Form -->
+			<div class="input-form" id="edit-event">
+                <input type="hidden" id="edit-event-id" value="" />
+                <h3 id="edit-event-title">Add Event</h3>
+                <div>
+                    <label>Title</label>
+                    <input type="text" id="edit-event-name" />
+                </div>
+                <div>
+                    <label>Date</label>
+                    <input type="text" id="edit-event-date" />
+                </div>
+                <div>
+                    <label>Location</label>
+                    <input type="text" id="edit-event-location" />
+                </div>
+                <div>
+                    <label>Mentioned in posts</label>
+                    <input type="text" id="edit-event-posts" />
+                </div>
+                <div>
+                    <label>Notes:</label><br/>
+                    <textarea id="edit-event-notes"> 
+                    </textarea>
+                </div>
+                <div class="form-buttons">
+                    <input type="button" value="Okay" onclick="editEvent()"/>
+                    <input type="button" value="Cancel" onclick="hideForms()"  />
+                </div>
+            </div>
+            
+    
+			<!-- Link Form -->
+			<div class="input-form" id="edit-link">
+                <input type="hidden" id="edit-link-id" value="" />
+                <h3 id="edit-link-title">Add Link</h3>
+                <div>
+                    <label>Title</label>
+                    <input type="text" id="edit-link-name" />
+                </div>
+                <div>
+                    <label>URL</label>
+                    <input type="text" id="edit-link-url" />
+                </div>
+                <div>
+                    <label>Date</label>
+                    <input type="text" id="edit-link-date" />
+                </div>
+                <div>
+                    <label>Linked in posts</label>
+                    <input type="text" id="edit-link-posts" />
+                </div>
+                <div>
+                    <label>Notes:</label><br/>
+                    <textarea id="edit-link-notes"> 
+                    </textarea>
+                </div>
+                <div class="form-buttons">
+                    <input type="button" value="Okay" onclick="editLink()"/>
+                    <input type="button" value="Cancel" onclick="hideForms()"  />
+                </div>
+            </div>
+            
+            <!-- Image Form -->
+			<div class="input-form" id="edit-image">
+				<input type="hidden" id="edit-image-id" value="" />
+				<h3 id="edit-image-title">Add Image</h3>
+				<div>
+					<label>Name</label>
+					<input type="text" id="edit-image-name" />
+				</div>
+				<div>
+					<label>Base64 encoded pic</label>
+					<input type="text" id="edit-image-data" />
+				</div>	
+				<div>
+					<label>Source URL</label>
+					<input type="text" id="edit-image-url" />
+				</div>
+				<div>
+					<label>Linked in posts</label>
+					<input type="text" id="edit-image-posts" />
+				</div>
+				<div>
+					<label>Notes:</label><br/>
+					<textarea id="edit-image-notes"> 
+					</textarea>
+				</div>
+				<div class="form-buttons">
+					<input type="button" value="Okay" onclick="editImage()"/>
+					<input type="button" value="Cancel" onclick="hideForms()"  />
+				</div>
+            </div>
+            
+
+		</div>
+		
+		<script type="text/javascript">
+			for(var c in colors)
+			{
+				var btn = document.getElementById("btn-" + c);
+				if(!btn)
+					continue;
+                
+				btn.style.backgroundColor = colors[c].bg;
+                btn.style.color = colors[c].fg;
+			}
+
+            // selection variables
+            var selectedobjs = [];
+			var dragging = false;
+			var dragstartpt = false;
+			
+            // canvas
+			var canvas = document.createElement("canvas");
+			canvas.id = "main";
+			canvas.width = C_CANVAS_WIDTH;
+			canvas.height = C_CANVAS_HEIGHT;
+			document.body.appendChild(canvas);
+			var ctx = canvas.getContext("2d");
+			ctx.font = C_LABEL_FONT;
+
+			class Connection{
+				constructor(id, entity1, entity2, how_connected)
+				{
+					this.entity1 = entity1;
+					this.entity2 = entity2;
+					this.how_connected = how_connected;
+					this.label = {ref:id, type:"connection"};
+				}
+				draw()
+				{
+					var reg1 = null;
+					var reg2 = null;
+
+					// MULTI-TYPE
+					if(map.entities[this.entity1])
+						reg1 = map.entities[this.entity1].region;
+					else if(map.questions[this.entity1])
+						reg1 = map.questions[this.entity1].region;
+                    else if(map.events[this.entity1])
+						reg1 = map.events[this.entity1].region;
+					else if(map.links[this.entity1])
+						reg1 = map.links[this.entity1].region;
+					else if(map.images[this.entity1])
+						reg1 = map.images[this.entity1].region;
+					if(map.entities[this.entity2])
+						reg2 = map.entities[this.entity2].region;
+					else if(map.questions[this.entity2])
+						reg2 = map.questions[this.entity2].region;
+                    else if(map.events[this.entity2])
+						reg2 = map.events[this.entity2].region;
+					else if(map.links[this.entity2])
+						reg2 = map.links[this.entity2].region;
+					else if(map.images[this.entity2])
+						reg2 = map.images[this.entity2].region;
+
+                    var conline = getConnectionLine(reg1, reg2);
+                    var ang = getAngle(conline.pt2, conline.pt1);
+
+					var reg1pt = conline.pt1;
+					var reg2pt = conline.pt2;
+
+					ctx.strokeStyle = C_CONNECTION_LINE_COLOR;
+                    ctx.fillStyle = C_CONNECTION_LINE_COLOR;
+					ctx.beginPath();
+					ctx.moveTo(reg1pt.x, reg1pt.y);
+					ctx.lineTo(reg2pt.x, reg2pt.y);                    
+					ctx.closePath();
+					ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(reg2pt.x, reg2pt.y);
+                    ctx.lineTo(reg2pt.x + Math.cos(ang - C_CONNECTION_ARROWHEAD_WIDTH / 2) * C_CONNECTION_ARROWHEAD_LENGTH, reg2pt.y + Math.sin(ang - C_CONNECTION_ARROWHEAD_WIDTH / 2) * C_CONNECTION_ARROWHEAD_LENGTH);
+                    ctx.lineTo(reg2pt.x + Math.cos(ang + C_CONNECTION_ARROWHEAD_WIDTH / 2) * C_CONNECTION_ARROWHEAD_LENGTH, reg2pt.y + Math.sin(ang + C_CONNECTION_ARROWHEAD_WIDTH / 2) * C_CONNECTION_ARROWHEAD_LENGTH);
+                    ctx.lineTo(reg2pt.x, reg2pt.y);
+                    ctx.closePath();
+                    ctx.fill();
+                    reg2pt.x += Math.cos(ang) * C_CONNECTION_ARROWHEAD_LENGTH;
+                    reg2pt.y += Math.sin(ang) * C_CONNECTION_ARROWHEAD_LENGTH;
+
+					var cpt = new Object();
+					cpt.x = Math.min(reg1pt.x, reg2pt.x) + (Math.max(reg1pt.x, reg2pt.x) - Math.min(reg1pt.x, reg2pt.x)) / 2;
+					cpt.y = Math.min(reg1pt.y, reg2pt.y) + (Math.max(reg1pt.y, reg2pt.y) - Math.min(reg1pt.y, reg2pt.y)) / 2;
+					var txtmetrics = ctx.measureText(this.how_connected);
+					
+					this.label.x = cpt.x - txtmetrics.width / 2;
+					this.label.y = cpt.y - 10;
+					this.label.width = txtmetrics.width;
+					this.label.height = 14;
+					ctx.clearRect(this.label.x, this.label.y, this.label.width, this.label.height);
+					if(selectedobjs.includes(this.label))
+						ctx.fillStyle = C_SELECTCOLOR;
+					else
+						ctx.fillStyle = "gray";
+					ctx.fillText(this.how_connected, this.label.x, this.label.y + 10);
+				}
+				contains(x, y)
+				{
+					if(x >= this.label.x && x <= this.label.x + this.label.width && y >= this.label.y && y <= this.label.y + this.label.height)
+					{
+						return true;
+					}
+					return false;
+				}
+			}
+
+			class Region {
+				constructor(obj, id) {
+					this.name = obj.name;
+					this.type = obj.type;
+					if(obj.region)
+					{
+						this.x = obj.region.x;
+						this.y = obj.region.y;
+						this.width = obj.region.width;
+						this.height = obj.region.height;
+					}
+					this.ref = id;
+				}
+				draw()
+				{
+					if(!this.x)
+					{
+                        this.x = window.innerWidth / 2 + document.body.scrollLeft;
+                        this.y = window.innerHeight / 2 + document.body.scrollTop;
+                    }
+
+					// MULTI-TYPE
+					if(this.type == "image")
+					{
+						if(pics[this.ref] && this.width)
+						{
+							var img = pics[this.ref];
+							ctx.fillStyle = "lightgray";
+							ctx.fillRect(this.x, this.y, img.width, img.height);
+							ctx.drawImage(img, this.x, this.y);
+							if(selectedobjs.includes(this))
+							{
+								ctx.strokeStyle = C_SELECTCOLOR;
+								ctx.strokeRect(this.x, this.y, this.width, this.height);
+							}
+						}
+						return;
+					}
+					
+                    if(colors[this.type])
+						ctx.fillStyle = colors[this.type].bg;
+					else
+						ctx.fillStyle = colors["entity"].bg;
+
+					ctx.fillRect(this.x, this.y, this.width, this.height);
+					
+					if(selectedobjs.includes(this))
+					{
+						ctx.strokeStyle = C_SELECTCOLOR;
+						ctx.beginPath();
+						ctx.strokeRect(this.x, this.y, this.width, this.height);
+						ctx.closePath();
+						ctx.stroke();
+					}
+					
+					// FOREGROUND COLOR
+					if(colors[this.type])
+                        ctx.fillStyle = colors[this.type].fg;
+					else
+						ctx.fillStyle = "black";
+
+					var wh = drawFontWrapped(this.Name, this.x, this.y + 10);
+                    this.width = wh.w;
+                    this.height = wh.h;
+				}
+				contains(x, y)
+				{
+					if(x >= this.x && x <= this.x + this.width && y >= this.y && y <= this.y + this.height)
+					{
+						return true;
+					}
+					return false;
+				}
+				set Name (val)
+				{
+					this.name = val;
+					if(this.type != "image")
+					{
+						var txtmetrics = ctx.measureText(this.name);
+						this.width = txtmetrics.width;
+					}
+				}
+				get Name()
+				{
+					if(this.type == "link")
+						return this.name + " »";
+					else
+						return this.name;
+				}
+			}
+
+			function drawFontWrapped(pstring, x, y)
+			{
+				var strparts = pstring.split(' ');
+				var buildstr = strparts[0];
+				var ret = {w:0, h:C_LINEHEIGHT};
+				if(strparts.length == 1)
+				{
+					var txtm = ctx.measureText(pstring);
+					ret.w = txtm.width;
+					ctx.fillText(buildstr, x, y);
+					return ret;
+				}
+				else
+				{
+					for(var p = 1; p < strparts.length; p++)
+					{
+						var txtm = ctx.measureText(buildstr + ' ' + strparts[p]);
+						if(txtm.width > C_MAXLABELLENGTH)
+						{
+							ctx.fillText(buildstr, x, y);
+							buildstr = strparts[p];
+							y += C_LINEHEIGHT;
+							ret.h += C_LINEHEIGHT;
+						}
+						else
+						{
+							ret.w = Math.max(txtm.width, ret.w);
+							buildstr += ' ' + strparts[p];
+						}
+					}
+					if(buildstr != C_EMPTYSTRING)
+					{
+						ctx.fillText(buildstr,x,y);
+					}
+				}
+				return ret;
+			}
+			
+            //
+            // EVENT LISTENERS
+            // 
+			window.addEventListener("load", function(e){
+				loadLocalData();
+			});
+            document.getElementById("data-options-button").addEventListener("click", function(e){
+                var panel = document.getElementById("data-options-panel");
+                if(e.target.className == "")
+                {
+                    panel.style.display = "block";
+                    e.target.className = "pushed";
+                }
+                else
+                {
+                    panel.style.display = "none";
+                    e.target.className = "";
+                }
+            });
+            document.getElementById("file-select").addEventListener("change", function(e){
+                selectedfile = e.target.files[0];
+            });
+            document.getElementById("map-title").addEventListener("blur", function(e){
+                map.title = e.target.value.trim().replace(/[^A-Za-z0-9-_\s\.\/\[\]\*]/g, "");
+                redraw();
+            });
+			document.addEventListener("keydown", function(e){
+				if(e.key == "Enter" && selectedobjs.length > 0)
+                {
+                    openObject(selectedobjs[0]);
+                }
+                else if(e.key == "p" && selectedobjs.length > 0)
+                {
+                    var npost = prompt("Add a Q post number (see qanonposts.com) \nto selected objects mention lists:");
+                    if(npost == null)
+                        return;
+                    if(/\s*[\d]+\s*/.test(npost) == false)
+                    {
+                        alert("Please enter a number.");
+                        return;
+                    }
+                    for(var ob in selectedobjs)
+                    {
+                        if(selectedobjs[ob].type == "connection")
+                        {
+                            continue;
+                        }
+                        else if(isEntity(selectedobjs[ob].type))
+                        {
+                            var entity = map.entities[selectedobjs[ob].ref];
+                            if(entity.posts.includes(npost))
+                                continue;
+                            else
+                                entity.posts.push(ob);
+                        }
+                        else
+                        {
+                            var entity = map[selectedobjs[ob].type][selectedobjs[ob].ref];
+                            if(entity.posts.includes(npost))
+                                continue;
+                            else
+                                entity.posts.push(ob);                            
+                        }
+                    }
+                }
+				else if(e.key == "Delete" && selectedobjs.length > 0)
+				{
+                    // DELETE
+					if(!confirm("Are you sure you want to delete the selected items?"))
+						return;
+
+					// MULTI-TYPE
+					for(var obj in selectedobjs)
+					{
+						if(selectedobjs[obj].type == "question")
+						{
+							delete map.questions[selectedobjs[obj].ref];
+						}
+						else if(selectedobjs[obj].type == "event")
+						{
+							delete map.events[selectedobjs[obj].ref];
+						}
+						else if(selectedobjs[obj].type == "connection")
+						{
+							delete map.connections[selectedobjs[obj].ref];
+						}
+						else if(selectedobjs[obj].type == "link")
+						{
+							delete map.links[selectedobjs[obj].ref];
+						}
+						else if(selectedobjs[obj].type == "image")
+						{
+							delete map.images[selectedobjs[obj].ref];
+						}
+						else
+						{
+							delete map.entities[selectedobjs[obj].ref];
+						}
+						for(var con in map.connections)
+						{
+							if(map.connections[con].entity1 == selectedobjs[obj].ref ||  map.connections[con].entity2 == selectedobjs[obj].ref)
+							{
+								delete map.connections[con];
+							}
+						}
+					}
+				}
+				redraw();
+			});
+            canvas.addEventListener("dblclick", function(e){
+                if(selectedobjs.length != 1)
+                {
+                    return;
+                }
+                openObject(selectedobjs[0]);
+            });
+			canvas.addEventListener("mousedown", function(e){
+				var foundobj = false;
+				
+				// MULTI-TYPE
+				// go through entities
+				for(var ent in map.entities)
+				{
+					if(map.entities[ent].region.contains(e.pageX, e.pageY))
+						foundobj = map.entities[ent].region;
+				}
+				// go through questions
+				for(var q in map.questions)
+				{
+					if(map.questions[q].region.contains(e.pageX, e.pageY))
+						foundobj = map.questions[q].region;
+				}
+				// go through questions
+				for(var v in map.events)
+				{
+					if(map.events[v].region.contains(e.pageX, e.pageY))
+						foundobj = map.events[v].region;
+				}
+				// go through links
+				for(var n in map.links)
+				{
+					if(map.links[n].region.contains(e.pageX, e.pageY))
+						foundobj = map.links[n].region;
+				}
+				// go through images
+				for(var i in map.images)
+				{
+					if(map.images[i].region.contains(e.pageX, e.pageY))
+						foundobj = map.images[i].region;
+				}
+
+				if(!foundobj)
+				{
+					if(!e.shiftKey)
+					{
+						selectedobjs = [];
+					}
+				}
+				else
+				{
+					if(e.shiftKey)
+					{
+						if(selectedobjs.includes(foundobj))
+						{
+							selectedobjs.splice(selectedobjs.indexOf(foundobj), 1);
+						}
+						else
+						{
+							selectedobjs.push(foundobj);
+						}
+					}
+                    else if(e.ctrlKey && selectedobjs.length == 1 && selectedobjs[0].type == "link")
+                    {
+                        var url = map.links[selectedobjs[0].ref].url;
+                        var yesno = confirm("Would you like to this link in another tab?\n" + url);
+                        if(yesno)
+                        {
+                            window.open(url, "_blank");
+                        }
+                        return;
+                    }
+					else
+					{
+						if(!selectedobjs.includes(foundobj))
+							selectedobjs = [foundobj];
+					}
+					dragstartpt = {x:e.x, y:e.y};
+				}
+				if(selectedobjs.length == 2)
+				{
+					document.getElementById("btn-connect").disabled = false;
+				}
+				else
+				{
+					document.getElementById("btn-connect").disabled = true;					
+				}
+				
+				if(selectedobjs.length == 0)
+				{
+					for(var con in map.connections)
+					{
+						if(map.connections[con].contains(e.pageX, e.pageY))
+						{
+							selectedobjs = [map.connections[con].label];
+							break;
+						}
+					}
+				}
+
+				redraw();
+			});
+			canvas.addEventListener("mousemove", function(e){
+				if(selectedobjs.length > 0 && dragging)
+				{
+					for(var ob in selectedobjs)
+					{
+						selectedobjs[ob].x = Math.min(Math.max(selectedobjs[ob].x + e.movementX, C_LABEL_MARGIN_LEFT), canvas.width - C_LABEL_MARGIN_RIGHT);
+						selectedobjs[ob].y = Math.min(Math.max(selectedobjs[ob].y + e.movementY, C_LABEL_MARGIN_TOP), canvas.height - C_LABEL_MARGIN_BOTTOM);
+					}
+					redraw();
+				}
+				if(!dragging && dragstartpt != false && distance(dragstartpt.x, dragstartpt.y, e.pageX, e.pageY) > 3)
+				{
+					dragging = true;
+				}
+			});
+			canvas.addEventListener("mouseup", function(e){
+				dragging = false;
+				dragstartpt = false;
+			});
+
+            // 
+            // CANVAS DRAW
+            // 
+			function redraw()
+			{
+				ctx.clearRect(0,0,canvas.width,canvas.height);
+				if(map == null)
+					return;
+				if(map.title && map.title != C_EMPTYSTRING)
+                {
+                    ctx.font = C_TITLE_FONT;
+                    ctx.fillStyle = C_TITLE_COLOR;
+                    var mtxt = ctx.measureText(map.title);
+                    ctx.fillText(map.title, canvas.width / 2 - mtxt.width / 2, 30);
+                    ctx.font = C_LABEL_FONT;
+                }
+				// MULTI-TYPE
+				for(var c in map.connections)
+				{
+					map.connections[c].draw();
+				}
+				for(var e in map.entities)
+				{
+					map.entities[e].region.draw();
+				}
+				for(var q in map.questions)
+				{
+					map.questions[q].region.draw();
+				}
+				for(var v in map.events)
+				{
+					map.events[v].region.draw();
+				}
+				for(var n in map.links)
+				{
+					map.links[n].region.draw();
+				}
+				for(var i in map.images)
+				{
+					map.images[i].region.draw();
+				}
+			}
+
+            // 
+            // HELPER FNS
+            // 
+            function isEntity(type)
+            {
+                return ("person org nation program location program".indexOf(type) != -1);
+            }
+
+            function openObject(obj)
+            {
+                if(isEntity(obj.type))
+                {
+                    showForm('entity');
+                }
+                else if(obj.type == "connection")
+                {
+                    var nhow = prompt("Connection Label:", map.connections[obj.ref].how_connected);
+                    map.connections[obj.ref].how_connected = (nhow == null || nhow == C_EMPTYSTRING) ? "?" : nhow;;
+                    redraw();
+                }
+                else
+                {
+                    showForm(obj.type);
+                }
+            }
+
+			function connectObjs()
+			{
+				var inp = prompt(selectedobjs[0].name + " -> _____ -> " + selectedobjs[1].name + "\n(ex: member of, funds, etc.)");
+				if(inp == null)
+					return;
+				else if(inp.trim() == "")
+					inp = "?";
+				var conid = selectedobjs[0].ref + "_" + selectedobjs[1].ref;
+				map.connections[conid] = new Connection(conid, selectedobjs[0].ref, selectedobjs[1].ref, inp);
+				redraw();
+			}
+            
+            function getConnectionLine(rect1, rect2)
+            {
+                var cpt1 = {x: rect1.x + rect1.width / 2, y: rect1.y + rect1.height / 2};
+                var cpt2 = {x: rect2.x + rect2.width / 2, y: rect2.y + rect2.height / 2};
+                var ipt1 = findIntersection(cpt1, cpt2, rect1);
+                var ipt2 = findIntersection(cpt1, cpt2, rect2);
+                return {pt1: ipt1, pt2: ipt2};
+            }
+    
+            function getAngle(v1, v2)
+            {
+                var xdiff = v2.x - v1.x;
+                var ydiff = v2.y - v1.y;
+                return Math.atan2(ydiff, xdiff);
+            }
+    
+            function findIntersection(pt1, pt2, rect)
+            {
+                var lines = [
+                    {x1:rect.x, y1: rect.y, x2: rect.x + rect.width, y2: rect.y},
+                    {x1:rect.x + rect.width, y1: rect.y, x2: rect.x + rect.width, y2: rect.y + rect.height},
+                    {x1:rect.x + rect.width, y1: rect.y + rect.height, x2: rect.x, y2: rect.y + rect.height},
+                    {x1:rect.x, y1: rect.y + rect.height, x2: rect.x, y2: rect.y}            
+                ];
+                var ipts = [
+                    line_intersect(pt1.x, pt1.y, pt2.x, pt2.y, lines[0].x1, lines[0].y1, lines[0].x2, lines[0].y2),
+                    line_intersect(pt1.x, pt1.y, pt2.x, pt2.y, lines[1].x1, lines[1].y1, lines[1].x2, lines[1].y2),
+                    line_intersect(pt1.x, pt1.y, pt2.x, pt2.y, lines[2].x1, lines[2].y1, lines[2].x2, lines[2].y2),
+                    line_intersect(pt1.x, pt1.y, pt2.x, pt2.y, lines[3].x1, lines[3].y1, lines[3].x2, lines[3].y2)
+                ];
+                var bestdist = -1;
+                var ret = null;
+                for(var i in ipts)
+                {
+                    if(ipts[i] != null && ipts[i].seg1 && ipts[i].seg2)
+                    {
+                        var dist = distance(pt1.x, pt1.y, ipts[i].x, ipts[i].y);
+                        if(dist < bestdist || bestdist == -1)
+                        {
+                            bestdist = dist;
+                            ret = ipts[i];
+                        }
+                    }
+                }
+                return ret;
+            }
+            function line_intersect(x1, y1, x2, y2, x3, y3, x4, y4)
+            {
+                var ua, ub, denom = (y4 - y3)*(x2 - x1) - (x4 - x3)*(y2 - y1);
+                if (denom == 0) {
+                    return null;
+                }
+                ua = ((x4 - x3)*(y1 - y3) - (y4 - y3)*(x1 - x3))/denom;
+                ub = ((x2 - x1)*(y1 - y3) - (y2 - y1)*(x1 - x3))/denom;
+                return {
+                    x: x1 + ua*(x2 - x1),
+                    y: y1 + ua*(y2 - y1),
+                    seg1: ua >= 0 && ua <= 1,
+                    seg2: ub >= 0 && ub <= 1
+                };
+            }
+            function distance(x1,y1,x2,y2)
+            { 
+                return Math.sqrt( Math.pow((x1-x2), 2) + Math.pow((y1-y2), 2) );
+            }
+            
+
+			hideForms();
+			redraw();
+		</script>
+	</body>
+</html> 
