@@ -2,6 +2,8 @@
 
 This tool was written for QAnon patriots looking to make maps out of QAnon's crumbs.
 
+![starter-map.json preview](https://github.com/Justinonq/crumbmapper/blob/master/starter-map-image.jpg)
+
 It is:
 * A browser based app - you download the crumb-mapper.html file and open it in a modern browser
 * Uses some modern browser features - namely Blob and javascript class objects
